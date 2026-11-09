@@ -172,11 +172,13 @@ input:focus, select:focus, textarea:focus, button:focus-visible {
 
 .lock-hero .wordmark,
 .lock-hero .logo,
-.lock-hero .eyebrow { color: #fff; }
+.lock-hero .eyebrow,
+.lock-hero h2 { color: #fff; }
 .lock-hero .tagline,
 .lock-hero .welcome-copy { color: #b5b5b5; }
 
-.welcome { max-width: 440px; }
+.welcome { display: grid; gap: 12px; max-width: 440px; }
+.welcome h2 { font-size: 40px; line-height: 1.1; }
 .welcome-copy { margin: 0; font-size: 16px; line-height: 1.6; }
 
 .lock-panel { display: grid; align-items: center; background: var(--bg); }
@@ -428,6 +430,13 @@ h2 { font-size: 28px; line-height: 1.15; }
 .nav-count { color: var(--faint); font-variant-numeric: tabular-nums; }
 
 .sidebar-actions { display: grid; gap: 8px; }
+.reset-link {
+  justify-self: center;
+  color: var(--faint);
+  font-size: 12px;
+}
+.lock-panel .reset-link { margin-top: 4px; }
+.reset-link:hover { color: var(--danger); }
 
 .workspace {
   min-width: 0;

@@ -28,6 +28,7 @@
           </div>
         </div>
         <div class="welcome">
+          <h2>Chào mừng</h2>
           <p class="welcome-copy">Lưu tài khoản web, SSH, server và database. Tìm cái cần dùng, chép, rồi khóa lại khi rời máy. Chỉ mật khẩu chính của bạn mở được kho.</p>
         </div>
       </div>
@@ -40,7 +41,7 @@
             <span>Mật khẩu chính<abbr class="req" title="Bắt buộc">*</abbr></span>
             <span class="field-control">
               <input id="master-password" type="password" autocomplete="off" spellcheck="false" required />
-              <button id="toggle-master" class="ghost-btn" type="button">Hiện</button>
+              <button id="toggle-master" class="ghost-btn" type="button" aria-label="Hiện mật khẩu"></button>
             </span>
           </label>
           <label id="confirm-wrap" class="field" hidden>
@@ -49,7 +50,8 @@
           </label>
           <p id="lock-error" class="form-error" role="alert"></p>
           <button id="unlock-btn" class="btn btn-primary btn-block" type="submit">Mở khóa</button>
-          <p class="fine-print">Ít nhất 8 ký tự. Hãy nhớ mật khẩu này — quên thì không mở lại được.</p>
+          <p class="fine-print">Ít nhất 8 ký tự. Hãy nhớ mật khẩu này — quên thì dữ liệu cũ không mở lại được.</p>
+          <button id="forgot-btn" class="text-btn reset-link" type="button" hidden>Quên mật khẩu chính?</button>
         </form>
       </div>
     </section>

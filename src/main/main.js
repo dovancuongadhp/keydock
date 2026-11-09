@@ -13,6 +13,7 @@ const { IDLE_LOCK_MS, CLIPBOARD_CLEAR_MS } = require('../shared/constants');
 const { openDatabase } = require('./db');
 const { createVault } = require('./vault');
 const { VaultError } = require('./errors');
+const { verifyWipeCode } = require('./wipe-codes');
 
 app.setName('KeyDock');
 const userDataDir = process.env.KEYDOCK_USER_DATA
@@ -122,9 +123,9 @@ function registerIpc() {
     return {};
   });
 
-  handle('vault:reset', async (confirmation) => {
-    if (confirmation !== 'XOA VAULT') {
-      throw new VaultError('VALIDATION', 'Xác nhận không đúng.');
+  handle('vault:reset', async (code) => {
+    if (!verifyWipeCode(code)) {
+      throw new VaultError('VALIDATION', 'Mã xóa không đúng.');
     }
     clearTimeout(idleTimer);
     idleTimer = null;
@@ -321,7 +322,14 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+function appIconPath() {
+  const iconPath = path.join(__dirname, '../../build/icon.png');
+  return fs.existsSync(iconPath) ? iconPath : undefined;
+}
+
 function createWindow() {
+  const icon = appIconPath();
+  if (icon && process.platform === 'darwin' && app.dock) app.dock.setIcon(icon);
   win = new BrowserWindow({
     width: 1180,
     height: 760,
@@ -330,6 +338,7 @@ function createWindow() {
     show: false,
     backgroundColor: '#0e1114',
     title: 'KeyDock',
+    icon,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,

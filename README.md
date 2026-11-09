@@ -38,4 +38,4 @@ File sao lưu là JSON **không mã hóa**, mỗi phần tử có `title`, `user
 
 Nếu tiêu đề trùng (không phân biệt hoa thường), hộp thoại hỏi ghi đè hoặc bỏ qua. Bản ghi thiếu tiêu đề bị bỏ qua.
 
-Quên mật khẩu chính thì không mở lại được. Màn hình khóa không có nút xóa vault. Muốn bỏ hẳn kho thì tắt app rồi xóa file `keydock.db`.
+Quên mật khẩu chính thì không mở lại bản ghi cũ. Khách bấm **Quên mật khẩu chính?** và nhập mã xóa được cấp. Không tự sinh mã trong app. Trên máy phát hành, `npm run wipe-codes` in 10 mã mới; mã cũ vẫn dùng được.

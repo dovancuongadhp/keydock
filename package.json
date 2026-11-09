@@ -5,8 +5,9 @@
   "main": "src/main/main.js",
   "author": "KeyDock",
   "scripts": {
-    "start": "electron .",
-    "test": "node --test test/crypto.test.js test/vault.test.js && node scripts/run-db-tests.js && node scripts/smoke-ui.js",
+    "start": "node scripts/dev-name.js && electron .",
+    "wipe-codes": "node scripts/issue-wipe-codes.js",
+    "test": "node --test test/crypto.test.js test/wipe-codes.test.js test/vault.test.js && node scripts/run-db-tests.js && node scripts/smoke-ui.js",
     "postinstall": "electron-builder install-app-deps",
     "dist": "electron-builder",
     "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg",
@@ -39,6 +40,7 @@
         "dmg"
       ],
       "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
       "identity": null,
       "hardenedRuntime": false
     },
@@ -46,6 +48,7 @@
       "title": "KeyDock"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         {
           "target": "nsis",

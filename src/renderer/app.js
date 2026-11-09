@@ -20,6 +20,7 @@ const exportBtn = $('export-btn');
 const importBtn = $('import-btn');
 const themeBtn = $('theme-btn');
 const lockBtn = $('lock-btn');
+const forgotBtn = $('forgot-btn');
 const searchInput = $('search-input');
 const newBtn = $('new-btn');
 const entryRows = $('entry-rows');
@@ -137,6 +138,13 @@ const DB_ENGINES = ['PostgreSQL', 'MySQL', 'MariaDB', 'SQLite', 'SQL Server', 'O
 const COPY_SVG = '<svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"></rect><path d="M6 16V6a1 1 0 0 1 1-1h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>';
 const EYE_SVG = '<svg viewBox="0 0 24 24"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.8"></path><circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" stroke-width="1.8"></circle></svg>';
 const EYE_OFF_SVG = '<svg viewBox="0 0 24 24"><path d="M3 3l18 18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path><path d="M9.9 5.2A10 10 0 0 1 12 5c6.5 0 10 7 10 7a18 18 0 0 1-3.2 4.2M6.1 6.1C3.6 7.8 2 12 2 12s3.5 6 10 6c1.5 0 2.9-.3 4.1-.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>';
+
+function setMasterToggle(shown) {
+  toggleMaster.innerHTML = shown ? EYE_OFF_SVG : EYE_SVG;
+  const label = shown ? 'Ẩn mật khẩu' : 'Hiện mật khẩu';
+  toggleMaster.setAttribute('aria-label', label);
+  toggleMaster.title = label;
+}
 
 const FIELD_SETS = {
   web: [{ id: 'editor-host', key: 'url', label: 'Địa chỉ web', placeholder: 'https://' }],
@@ -942,6 +950,7 @@ function showLock(message) {
   lockScreen.hidden = false;
   const firstRun = !state.initialized;
   confirmWrap.hidden = !firstRun;
+  forgotBtn.hidden = firstRun;
   unlockBtn.textContent = firstRun ? 'Tạo vault' : 'Mở khóa';
   lockHeading.textContent = firstRun ? 'Tạo vault mới' : 'Mở vault';
   lockCopy.textContent = firstRun
@@ -951,7 +960,7 @@ function showLock(message) {
   masterPassword.value = '';
   confirmPassword.value = '';
   masterPassword.type = 'password';
-  toggleMaster.textContent = 'Hiện';
+  setMasterToggle(false);
   unlockBtn.disabled = false;
   masterPassword.focus();
 }
@@ -1367,7 +1376,7 @@ function settleModal(value) {
   if (resolve) resolve(value);
 }
 
-function openModal({ title, body, actions, expected, prompt, extra, wide }) {
+function openModal({ title, body, actions, expected, prompt, promptError, extra, wide }) {
   if (modalResolver) settleModal(null);
   const card = modalTitle.closest('.modal-card');
   if (card) card.classList.toggle('modal-card--wide', Boolean(wide));
@@ -1384,7 +1393,7 @@ function openModal({ title, body, actions, expected, prompt, extra, wide }) {
     input.autocomplete = 'off';
     input.spellcheck = false;
     input.placeholder = prompt || expected;
-    input.setAttribute('aria-label', prompt ? 'Tên danh mục' : 'Xác nhận');
+    input.setAttribute('aria-label', prompt || 'Xác nhận');
     modalExtra.append(input);
   }
   for (const action of actions) {
@@ -1401,7 +1410,7 @@ function openModal({ title, body, actions, expected, prompt, extra, wide }) {
       if (action.value && prompt) {
         const text = input.value.trim();
         if (!text) {
-          modalError.textContent = 'Hãy nhập tên danh mục.';
+          modalError.textContent = promptError || 'Hãy nhập tên danh mục.';
           input.focus();
           return;
         }
@@ -1756,6 +1765,27 @@ async function startImport() {
   showToast(`Đã nhập ${result.created} bản ghi mới, ghi đè ${result.overwritten}, bỏ qua ${result.skipped}.`);
 }
 
+async function resetVault() {
+  const code = await openModal({
+    title: 'Xóa vault trên máy này?',
+    body: 'Cần mã xóa được cấp. Bản ghi cũ sẽ mất và không mở lại được.',
+    prompt: 'Mã xóa',
+    promptError: 'Hãy nhập mã xóa.',
+    actions: [
+      { label: 'Hủy', value: null },
+      { label: 'Xóa vault', value: 'reset', danger: true },
+    ],
+  });
+  if (!code || typeof code !== 'string') return;
+  const result = await window.keydock.reset(code);
+  if (!result.ok) {
+    showToast(result.error);
+    return;
+  }
+  state.initialized = false;
+  showLock('Vault trên máy này đã được xóa. Hãy tạo mật khẩu chính mới nếu muốn dùng tiếp.');
+}
+
 async function removeSelected() {
   if (!state.selectedId) return;
   const title = state.detail ? state.detail.title : 'bản ghi này';
@@ -1927,10 +1957,11 @@ function bind() {
   toggleMaster.addEventListener('click', () => {
     const show = masterPassword.type === 'password';
     masterPassword.type = show ? 'text' : 'password';
-    toggleMaster.textContent = show ? 'Ẩn' : 'Hiện';
+    setMasterToggle(show);
   });
   themeBtn.addEventListener('click', toggleTheme);
   lockBtn.addEventListener('click', () => window.keydock.lock());
+  forgotBtn.addEventListener('click', resetVault);
   jsonBtn.addEventListener('click', (event) => {
     event.stopPropagation();
     const willOpen = jsonMenu.hidden;
