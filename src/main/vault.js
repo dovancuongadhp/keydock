@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { CATEGORIES } = require('../shared/constants');
+const { KINDS } = require('../shared/constants');
 const { VaultError } = require('./errors');
 const {
   KDF_ITERATIONS,
@@ -46,15 +46,14 @@ function createVault(database, options = {}) {
   }
 
   function present(row, data) {
+    const record = storedRecord(data);
+    const first = record.accounts[0] || { username: '', password: '' };
     return {
       id: row.id,
-      title: data.title,
-      username: data.username,
-      host: data.host,
-      category: data.category,
-      note: data.note,
-      password: data.password,
-      hasPassword: data.password.length > 0,
+      ...record,
+      username: first.username,
+      password: first.password,
+      hasPassword: record.accounts.some((account) => account.password),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       corrupt: false,
@@ -67,9 +66,13 @@ function createVault(database, options = {}) {
       title: 'Không giải mã được',
       username: '',
       host: '',
-      category: 'Other',
+      url: '',
+      category: '',
+      kind: 'web',
       note: '',
+      accountCount: 0,
       hasPassword: false,
+      accounts: [],
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       corrupt: true,
@@ -78,8 +81,32 @@ function createVault(database, options = {}) {
 
   function toSummary(entry) {
     if (entry.corrupt) return corruptSummary(entry.row);
-    const { password, ...summary } = present(entry.row, entry.data);
-    return summary;
+    const full = present(entry.row, entry.data);
+    return {
+      id: full.id,
+      title: full.title,
+      username: full.username,
+      host: full.kind === 'web' ? full.url : full.host,
+      url: full.url,
+      port: full.port,
+      engine: full.engine,
+      database: full.database,
+      protocol: full.protocol,
+      category: full.category,
+      kind: full.kind,
+      note: full.note,
+      accountCount: full.accounts.length,
+      hasPassword: full.hasPassword,
+      accounts: full.accounts.map((account) => ({
+        id: account.id,
+        username: account.username,
+        hasPassword: Boolean(account.password),
+        hasKey: Boolean(account.privateKey),
+      })),
+      createdAt: full.createdAt,
+      updatedAt: full.updatedAt,
+      corrupt: false,
+    };
   }
 
   function listRecords() {
@@ -158,26 +185,39 @@ function createVault(database, options = {}) {
     const value = mustNormalize(input);
     const now = Date.now();
     const id = crypto.randomUUID();
-    database.insertEntry({
-      id,
-      payload: seal(value),
-      createdAt: now,
-      updatedAt: now,
+    database.transaction(() => {
+      database.insertEntry({
+        id,
+        payload: seal(value),
+        createdAt: now,
+        updatedAt: now,
+      });
+      rememberGroup(value.kind, value.category);
     });
     return { id };
   }
 
   function update(id, input) {
     assertUnlocked();
-    if (!database.getEntry(id)) throw new VaultError('NOT_FOUND', 'Không tìm thấy bản ghi.');
+    const current = database.getEntry(id);
+    if (!current) throw new VaultError('NOT_FOUND', 'Không tìm thấy bản ghi.');
     const value = mustNormalize(input);
-    database.updateEntry(id, { payload: seal(value), updatedAt: Date.now() });
+    database.transaction(() => {
+      rememberRevision(id, current.payload, 'update');
+      database.updateEntry(id, { payload: seal(value), updatedAt: Date.now() });
+      rememberGroup(value.kind, value.category);
+    });
     return { id };
   }
 
   function remove(id) {
     assertUnlocked();
-    if (!database.deleteEntry(id)) throw new VaultError('NOT_FOUND', 'Không tìm thấy bản ghi.');
+    const current = database.getEntry(id);
+    if (!current) throw new VaultError('NOT_FOUND', 'Không tìm thấy bản ghi.');
+    database.transaction(() => {
+      rememberRevision(id, current.payload, 'delete');
+      database.deleteEntry(id);
+    });
     return { id };
   }
 
@@ -192,27 +232,46 @@ function createVault(database, options = {}) {
     }
   }
 
-  function getPassword(id) {
+  function getPassword(id, accountId) {
     const entry = get(id);
-    if (!entry.password) throw new VaultError('VALIDATION', 'Bản ghi này không có mật khẩu.');
-    return entry.password;
+    const account = accountId
+      ? entry.accounts.find((item) => item.id === accountId)
+      : entry.accounts.find((item) => item.password);
+    if (!account || !account.password) throw new VaultError('VALIDATION', 'Bản ghi này không có mật khẩu.');
+    return account.password;
   }
 
-  function exportEntries() {
+  function exportEntries(ids) {
+    const allow = Array.isArray(ids) ? new Set(ids.map(String)) : null;
     const entries = [];
     let skippedCorrupt = 0;
     for (const item of readAll()) {
+      if (allow && !allow.has(item.row.id)) continue;
       if (item.corrupt) {
         skippedCorrupt += 1;
         continue;
       }
+      const record = storedRecord(item.data);
+      const first = record.accounts[0] || { username: '', password: '' };
       entries.push({
-        title: item.data.title,
-        username: item.data.username,
-        password: item.data.password,
-        host: item.data.host,
-        category: item.data.category,
-        note: item.data.note,
+        title: record.title,
+        username: first.username,
+        password: first.password,
+        host: record.kind === 'web' ? record.url : record.host,
+        category: record.category,
+        note: record.note,
+        kind: record.kind,
+        url: record.url,
+        port: record.port,
+        engine: record.engine,
+        database: record.database,
+        protocol: record.protocol,
+        accounts: record.accounts.map((account) => ({
+          username: account.username,
+          password: account.password,
+          privateKey: account.privateKey,
+          passphrase: account.passphrase,
+        })),
       });
     }
     entries.sort((a, b) => a.title.localeCompare(b.title));
@@ -234,6 +293,7 @@ function createVault(database, options = {}) {
     }
 
     const items = [];
+    const rows = [];
     const duplicateTitles = [];
     let newCount = 0;
     let duplicateCount = 0;
@@ -243,17 +303,36 @@ function createVault(database, options = {}) {
       const parsed = normalizeEntry(raw);
       if (parsed.error) {
         invalidCount += 1;
+        rows.push({
+          title: raw && typeof raw.title === 'string' ? raw.title.trim().slice(0, 80) : '',
+          username: '',
+          host: '',
+          kind: '',
+          category: '',
+          status: 'invalid',
+        });
         continue;
       }
       const titleKey = normalizeTitle(parsed.value.title);
-      if (seen.has(titleKey)) {
+      const duplicate = seen.has(titleKey);
+      if (duplicate) {
         duplicateCount += 1;
         duplicateTitles.push(parsed.value.title);
       } else {
         newCount += 1;
         seen.add(titleKey);
       }
-      items.push(parsed.value);
+      const record = parsed.value;
+      const account = record.accounts[0] || { username: '' };
+      rows.push({
+        title: record.title,
+        username: account.username,
+        host: record.kind === 'web' ? record.url : record.host,
+        kind: record.kind,
+        category: record.category,
+        status: duplicate ? 'duplicate' : 'new',
+      });
+      items.push(record);
     }
 
     pendingImport = items;
@@ -264,6 +343,8 @@ function createVault(database, options = {}) {
       invalidCount,
       duplicateTitles: duplicateTitles.slice(0, 8).map(shortTitle),
       duplicateTitleExtra: Math.max(0, duplicateTitles.length - 8),
+      rows: rows.slice(0, 400),
+      rowsExtra: Math.max(0, rows.length - 400),
     };
   }
 
@@ -286,12 +367,16 @@ function createVault(database, options = {}) {
             result.skipped += 1;
             continue;
           }
+          const current = database.getEntry(existingId);
+          if (current) rememberRevision(existingId, current.payload, 'update');
           database.updateEntry(existingId, { payload: seal(value), updatedAt: Date.now() });
+          rememberGroup(value.kind, value.category);
           result.overwritten += 1;
         } else {
           const id = crypto.randomUUID();
           const now = Date.now();
           database.insertEntry({ id, payload: seal(value), createdAt: now, updatedAt: now });
+          rememberGroup(value.kind, value.category);
           map.set(titleKey, id);
           result.created += 1;
         }
@@ -306,13 +391,253 @@ function createVault(database, options = {}) {
     return { canceled: true };
   }
 
-  function makePassword(length) {
+  function makePassword(options) {
     assertUnlocked();
     try {
-      return { password: generatePassword(length) };
+      return { password: generatePassword(options || {}) };
     } catch {
-      throw new VaultError('VALIDATION', 'Độ dài mật khẩu phải từ 12 đến 128.');
+      throw new VaultError('VALIDATION', 'Chọn độ dài từ 8 đến 128 và ít nhất một nhóm ký tự.');
     }
+  }
+
+  function readGroups() {
+    const groups = emptyGroups();
+    const raw = database.getMeta('custom_categories');
+    if (!raw || !key) return groups;
+    try {
+      const parsed = JSON.parse(decrypt(key, raw));
+      if (Array.isArray(parsed)) {
+        groups.web = uniqueGroupNames(parsed);
+        return groups;
+      }
+      if (parsed && typeof parsed === 'object') {
+        for (const kind of Object.keys(groups)) groups[kind] = uniqueGroupNames(parsed[kind] || []);
+      }
+    } catch {
+      return emptyGroups();
+    }
+    return groups;
+  }
+
+  function writeGroups(groups) {
+    database.setMeta('custom_categories', encrypt(key, JSON.stringify(groups)));
+  }
+
+  function rememberGroup(kind, name) {
+    const cleaned = String(name || '').trim();
+    if (!cleaned || !emptyGroups()[kind]) return;
+    const groups = readGroups();
+    if (groups[kind].some((item) => item.toLowerCase() === cleaned.toLowerCase())) return;
+    if (groups[kind].length >= 40) return;
+    groups[kind].push(cleaned);
+    writeGroups(groups);
+  }
+
+  function rememberRevision(entryId, payload, action) {
+    database.insertRevision({
+      id: crypto.randomUUID(),
+      entryId,
+      payload,
+      action,
+      createdAt: Date.now(),
+    });
+  }
+
+  function publicCatalog() {
+    return {
+      kinds: KINDS.map((item) => ({ ...item, builtin: true })),
+      groups: readGroups(),
+    };
+  }
+
+  function addCategory(kind, name) {
+    assertUnlocked();
+    const cleanKind = emptyGroups()[kind] ? kind : '';
+    if (!cleanKind) throw new VaultError('VALIDATION', 'Hãy chọn loại Web, SSH, Server hoặc Database.');
+    const cleaned = cleanCategoryName(name);
+    if (cleaned.error) throw new VaultError('VALIDATION', cleaned.error);
+    const groups = readGroups();
+    if (groups[cleanKind].some((item) => item.toLowerCase() === cleaned.toLowerCase())) {
+      throw new VaultError('VALIDATION', 'Danh mục đã tồn tại trong loại này.');
+    }
+    if (groups[cleanKind].length >= 40) throw new VaultError('VALIDATION', 'Loại này đã có quá nhiều danh mục.');
+    groups[cleanKind].push(cleaned);
+    writeGroups(groups);
+    return publicCatalog();
+  }
+
+  function removeCategory(kind, name) {
+    assertUnlocked();
+    const cleanKind = emptyGroups()[kind] ? kind : '';
+    if (!cleanKind) throw new VaultError('VALIDATION', 'Không xóa được loại có sẵn.');
+    const target = String(name || '').trim();
+    const groups = readGroups();
+    const next = groups[cleanKind].filter((item) => item.toLowerCase() !== target.toLowerCase());
+    if (next.length === groups[cleanKind].length) throw new VaultError('NOT_FOUND', 'Không tìm thấy danh mục.');
+    database.transaction(() => {
+      for (const item of readAll()) {
+        if (item.corrupt) continue;
+        const record = storedRecord(item.data);
+        if (record.kind !== cleanKind) continue;
+        if (record.category.toLowerCase() !== target.toLowerCase()) continue;
+        rememberRevision(item.row.id, item.row.payload, 'update');
+        const moved = mustNormalize({ ...item.data, kind: cleanKind, category: '' });
+        database.updateEntry(item.row.id, { payload: seal(moved), updatedAt: Date.now() });
+      }
+      groups[cleanKind] = next;
+      writeGroups(groups);
+    });
+    return publicCatalog();
+  }
+
+  function history(id) {
+    assertUnlocked();
+    const entry = database.getEntry(id);
+    if (!entry) throw new VaultError('NOT_FOUND', 'Không tìm thấy bản ghi.');
+    let current = null;
+    try {
+      current = storedRecord(JSON.parse(decrypt(key, entry.payload)));
+    } catch {
+      current = null;
+    }
+    return database.listRevisions(id)
+      .filter((row) => row.action !== 'delete')
+      .map((row) => describeRevision(row, current));
+  }
+
+  function revisionSecret(revisionId) {
+    assertUnlocked();
+    const row = database.getRevision(revisionId);
+    if (!row) throw new VaultError('NOT_FOUND', 'Không tìm thấy phiên bản này.');
+    let data;
+    try {
+      data = JSON.parse(decrypt(key, row.payload));
+    } catch {
+      throw new VaultError('CORRUPT', 'Không giải mã được phiên bản này.');
+    }
+    const account = storedRecord(data).accounts[0] || {};
+    return {
+      password: account.password || '',
+      privateKey: account.privateKey || '',
+      passphrase: account.passphrase || '',
+    };
+  }
+
+  function restore(revisionId) {
+    assertUnlocked();
+    const row = database.getRevision(revisionId);
+    if (!row) throw new VaultError('NOT_FOUND', 'Không tìm thấy phiên bản này.');
+    let data;
+    try {
+      data = JSON.parse(decrypt(key, row.payload));
+    } catch {
+      throw new VaultError('CORRUPT', 'Không giải mã được phiên bản này.');
+    }
+    const value = mustNormalize(data);
+    const existing = database.getEntry(row.entryId);
+    database.transaction(() => {
+      if (existing) {
+        rememberRevision(existing.id, existing.payload, 'update');
+        database.updateEntry(existing.id, { payload: seal(value), updatedAt: Date.now() });
+      } else {
+        const now = Date.now();
+        database.insertEntry({
+          id: row.entryId,
+          payload: seal(value),
+          createdAt: row.createdAt,
+          updatedAt: now,
+        });
+      }
+      rememberGroup(value.kind, value.category);
+    });
+    return { id: row.entryId };
+  }
+
+  function describeRevision(row, current) {
+    let title = 'Không giải mã được';
+    let preview = null;
+    try {
+      const record = storedRecord(JSON.parse(decrypt(key, row.payload)));
+      const account = record.accounts[0] || {};
+      const currentAccount = current && current.accounts ? (current.accounts[0] || {}) : {};
+      title = record.title || title;
+      const note = record.note.length > 280 ? `${record.note.slice(0, 280)}…` : record.note;
+      preview = {
+        title: record.title,
+        kind: record.kind,
+        category: record.category,
+        username: account.username || '',
+        host: record.kind === 'web' ? record.url : record.host,
+        url: record.url,
+        port: record.port,
+        engine: record.engine,
+        database: record.database,
+        protocol: record.protocol,
+        note,
+        hasPassword: Boolean(account.password),
+        hasKey: Boolean(account.privateKey),
+        passwordChanged: Boolean(current) && (account.password || '') !== (currentAccount.password || ''),
+        keyChanged: Boolean(current) && (account.privateKey || '') !== (currentAccount.privateKey || ''),
+      };
+    } catch {
+      title = 'Không giải mã được';
+    }
+    return {
+      id: row.id,
+      entryId: row.entryId,
+      action: row.action,
+      createdAt: row.createdAt,
+      title,
+      preview,
+    };
+  }
+
+  function deletedRecords() {
+    assertUnlocked();
+    const live = new Set(database.allEntries().map((row) => row.id));
+    const seen = new Set();
+    const items = [];
+    for (const row of database.listDeletedRevisions()) {
+      if (live.has(row.entryId) || seen.has(row.entryId)) continue;
+      seen.add(row.entryId);
+      let title = 'Không giải mã được';
+      let kind = 'web';
+      let category = '';
+      try {
+        const record = storedRecord(JSON.parse(decrypt(key, row.payload)));
+        title = record.title || title;
+        kind = record.kind;
+        category = record.category;
+      } catch {
+        title = 'Không giải mã được';
+      }
+      items.push({
+        revisionId: row.id,
+        entryId: row.entryId,
+        title,
+        kind,
+        category,
+        deletedAt: row.createdAt,
+      });
+    }
+    return items;
+  }
+
+  function purgeDeleted(revisionIds) {
+    assertUnlocked();
+    const wanted = new Set((Array.isArray(revisionIds) ? revisionIds : []).filter((id) => typeof id === 'string' && id));
+    if (!wanted.size) throw new VaultError('VALIDATION', 'Chưa chọn bản ghi nào.');
+    const live = new Set(database.allEntries().map((row) => row.id));
+    const entryIds = new Set();
+    for (const row of database.listDeletedRevisions()) {
+      if (!wanted.has(row.id) || live.has(row.entryId)) continue;
+      entryIds.add(row.entryId);
+    }
+    if (!entryIds.size) throw new VaultError('NOT_FOUND', 'Không tìm thấy bản ghi trong thùng rác.');
+    database.transaction(() => {
+      for (const entryId of entryIds) database.deleteEntryRevisions(entryId);
+    });
+    return { removed: entryIds.size };
   }
 
   return {
@@ -332,6 +657,22 @@ function createVault(database, options = {}) {
     applyImport,
     cancelImport,
     generatePassword: makePassword,
+    listCategories() {
+      if (!key) {
+        return {
+          kinds: KINDS.map((item) => ({ ...item, builtin: true })),
+          groups: emptyGroups(),
+        };
+      }
+      return publicCatalog();
+    },
+    addCategory,
+    removeCategory,
+    history,
+    revisionSecret,
+    restore,
+    deletedRecords,
+    purgeDeleted,
   };
 }
 
@@ -354,6 +695,103 @@ function asText(value) {
   return { error: true };
 }
 
+function emptyGroups() {
+  return { web: [], ssh: [], server: [], database: [] };
+}
+
+function isTypeName(value) {
+  return ['web', 'email', 'ssh', 'ssh key', 'server', 'database'].includes(String(value || '').toLowerCase());
+}
+
+function uniqueGroupNames(list) {
+  const seen = new Set();
+  const names = [];
+  for (const item of list) {
+    if (typeof item !== 'string') continue;
+    const name = item.trim().replace(/\s+/g, ' ');
+    const key = name.toLowerCase();
+    if (!name || name.length > 40 || seen.has(key) || isTypeName(name)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
+function placementFrom(input) {
+  const source = input || {};
+  const rawKind = String(source.kind || '').trim().toLowerCase();
+  const rawCategory = asText(source.category);
+  if (rawCategory.error) return { error: 'Tên danh mục không hợp lệ.' };
+  const categoryText = rawCategory.trim().replace(/\s+/g, ' ');
+  if (categoryText.length > 40 || /[\r\n]/.test(categoryText)) {
+    return { error: 'Tên danh mục không hợp lệ.' };
+  }
+  let kind = '';
+  if (rawKind === 'email') kind = 'web';
+  else if (emptyGroups()[rawKind]) kind = rawKind;
+  else if (categoryText.toLowerCase() === 'ssh' || categoryText.toLowerCase() === 'ssh key') kind = 'ssh';
+  else if (categoryText.toLowerCase() === 'server') kind = 'server';
+  else if (categoryText.toLowerCase() === 'database') kind = 'database';
+  else kind = 'web';
+  return { kind, category: isTypeName(categoryText) ? '' : categoryText };
+}
+
+function cleanCategoryName(value) {
+  const name = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!name) return { error: 'Hãy nhập tên danh mục.' };
+  if (name.length > 40 || /[\r\n]/.test(name)) return { error: 'Tên danh mục quá dài.' };
+  return name;
+}
+
+function cleanPort(value) {
+  const text = asText(value);
+  if (text.error) return { error: 'Cổng không hợp lệ.' };
+  const port = text.trim();
+  if (!port) return '';
+  if (!/^\d{1,5}$/.test(port) || Number(port) < 1 || Number(port) > 65535) {
+    return { error: 'Cổng phải từ 1 đến 65535.' };
+  }
+  return String(Number(port));
+}
+
+function normalizeAccounts(input, kind) {
+  const source = Array.isArray(input.accounts) && input.accounts.length
+    ? [input.accounts[0]]
+    : [{
+      username: input.username,
+      password: input.password,
+      privateKey: input.privateKey,
+      passphrase: input.passphrase,
+    }];
+  const accounts = [];
+  for (let index = 0; index < source.length; index += 1) {
+    const raw = source[index];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: 'Tài khoản không hợp lệ.' };
+    const username = asText(raw.username);
+    const password = asText(raw.password);
+    const privateKey = asText(raw.privateKey);
+    const passphrase = asText(raw.passphrase);
+    if (username.error || password.error || privateKey.error || passphrase.error) {
+      return { error: 'Tài khoản không hợp lệ.' };
+    }
+    if (username.trim().length > 320) return { error: 'Tài khoản quá dài.' };
+    if (password.length > 2048) return { error: 'Mật khẩu quá dài.' };
+    if (privateKey.length > 20000) return { error: 'Khóa riêng quá dài.' };
+    if (passphrase.length > 2048) return { error: 'Passphrase quá dài.' };
+    const id = typeof raw.id === 'string' && raw.id.trim() && raw.id.length <= 80
+      ? raw.id.trim()
+      : `legacy-${index}`;
+    accounts.push({
+      id,
+      username: username.trim(),
+      password,
+      privateKey: kind === 'ssh' ? privateKey : '',
+      passphrase: kind === 'ssh' ? passphrase : '',
+    });
+  }
+  return { accounts };
+}
+
 function normalizeEntry(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { error: 'Bản ghi không hợp lệ.' };
@@ -364,33 +802,75 @@ function normalizeEntry(input) {
   if (!title) return { error: 'Thiếu tiêu đề.' };
   if (title.length > 200) return { error: 'Tiêu đề quá dài.' };
 
-  const usernameRaw = asText(input.username);
-  const passwordRaw = asText(input.password);
-  const hostRaw = asText(input.host);
+  const place = placementFrom(input);
+  if (place.error) return place;
+  const { kind, category } = place;
+  const accounts = normalizeAccounts(input, kind);
+  if (accounts.error) return accounts;
+
   const noteRaw = asText(input.note);
-  if (usernameRaw.error || passwordRaw.error || hostRaw.error || noteRaw.error) {
+  const urlRaw = asText(input.url);
+  const hostRaw = asText(input.host);
+  const engineRaw = asText(input.engine);
+  const databaseRaw = asText(input.database);
+  const protocolRaw = asText(input.protocol);
+  if (noteRaw.error || urlRaw.error || hostRaw.error || engineRaw.error || databaseRaw.error || protocolRaw.error) {
     return { error: 'Trường văn bản không hợp lệ.' };
   }
-
-  const username = usernameRaw.trim();
-  const host = hostRaw.trim();
-  const password = passwordRaw;
   const note = noteRaw;
-  if (username.length > 320) return { error: 'Tài khoản quá dài.' };
-  if (host.length > 500) return { error: 'Máy chủ quá dài.' };
-  if (password.length > 2048) return { error: 'Mật khẩu quá dài.' };
   if (note.length > 20000) return { error: 'Ghi chú quá dài.' };
+  const port = cleanPort(input.port);
+  if (port.error) return port;
+  const address = (hostRaw || urlRaw).trim();
+  if (address.length > 500) return { error: 'Máy chủ quá dài.' };
+  const engine = kind === 'database' ? engineRaw.trim() : '';
+  if (engine.length > 80) return { error: 'Tên hệ quản trị quá dài.' };
+  if (databaseRaw.trim().length > 200) return { error: 'Tên database quá dài.' };
 
-  const categoryRaw = asText(input.category);
-  let category = 'Other';
-  if (!categoryRaw.error && categoryRaw.trim()) {
-    const requested = categoryRaw.trim();
-    const match = CATEGORIES.find((item) => item.toLowerCase() === requested.toLowerCase());
-    if (match) category = match;
-    else if (requested.length <= 40 && !/[\r\n]/.test(requested)) category = requested;
-  }
+  const webLike = kind === 'web';
+  return {
+    value: {
+      title,
+      category,
+      kind,
+      note,
+      url: webLike ? (urlRaw.trim() || hostRaw.trim()) : '',
+      host: webLike ? '' : hostRaw.trim(),
+      port: webLike ? '' : port,
+      engine,
+      database: kind === 'database' ? databaseRaw.trim() : '',
+      protocol: kind === 'server' ? protocolRaw.trim() : '',
+      accounts: accounts.accounts,
+    },
+  };
+}
 
-  return { value: { title, username, password, host, category, note } };
+function storedRecord(data) {
+  const place = placementFrom(data);
+  const kind = place.error ? 'web' : place.kind;
+  const category = place.error ? '' : place.category;
+  const accounts = normalizeAccounts(data || {}, kind);
+  const safeAccounts = accounts.accounts || [{
+    id: 'legacy-0',
+    username: '',
+    password: '',
+    privateKey: '',
+    passphrase: '',
+  }];
+  const webLike = kind === 'web';
+  return {
+    title: String((data && data.title) || ''),
+    category,
+    kind,
+    note: String((data && data.note) || ''),
+    url: webLike ? String((data && (data.url || data.host)) || '') : '',
+    host: webLike ? '' : String((data && data.host) || ''),
+    port: webLike ? '' : String((data && data.port) || ''),
+    engine: kind === 'database' ? String((data && data.engine) || '') : '',
+    database: kind === 'database' ? String((data && data.database) || '') : '',
+    protocol: kind === 'server' ? String((data && data.protocol) || '') : '',
+    accounts: safeAccounts,
+  };
 }
 
 function mustNormalize(input) {

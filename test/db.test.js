@@ -43,6 +43,11 @@ function main() {
     assert.equal(reopened.getEntry('1').payload, 'next');
     assert.equal(reopened.deleteEntry('1'), true);
     assert.equal(reopened.allEntries().length, 0);
+    reopened.insertRevision({ id: 'r1', entryId: '1', payload: 'old', action: 'delete', createdAt: 40 });
+    assert.equal(reopened.getRevision('r1').entryId, '1');
+    assert.equal(reopened.listDeletedRevisions().length, 1);
+    reopened.deleteEntryRevisions('1');
+    assert.equal(reopened.listDeletedRevisions().length, 0);
     reopened.close();
     console.log('sqlite adapter ok');
   } finally {

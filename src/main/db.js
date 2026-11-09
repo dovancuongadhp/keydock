@@ -19,6 +19,14 @@ function openDatabase(filePath) {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS revisions (
+      id TEXT PRIMARY KEY,
+      entry_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      action TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_revisions_entry ON revisions (entry_id, created_at DESC);
   `);
 
   const getMetaStmt = database.prepare('SELECT value FROM meta WHERE key = ?');
@@ -36,6 +44,26 @@ function openDatabase(filePath) {
   const deleteStmt = database.prepare('DELETE FROM entries WHERE id = ?');
   const getStmt = database.prepare('SELECT id, payload, created_at, updated_at FROM entries WHERE id = ?');
   const allStmt = database.prepare('SELECT id, payload, created_at, updated_at FROM entries');
+  const insertRevisionStmt = database.prepare(`
+    INSERT INTO revisions (id, entry_id, payload, action, created_at)
+    VALUES (@id, @entryId, @payload, @action, @createdAt)
+  `);
+  const listRevisionsStmt = database.prepare(`
+    SELECT id, entry_id, payload, action, created_at
+    FROM revisions WHERE entry_id = ? ORDER BY created_at DESC
+  `);
+  const getRevisionStmt = database.prepare(`
+    SELECT id, entry_id, payload, action, created_at FROM revisions WHERE id = ?
+  `);
+  const listDeletedStmt = database.prepare(`
+    SELECT id, entry_id, payload, action, created_at
+    FROM revisions WHERE action = 'delete' ORDER BY created_at DESC
+  `);
+  const staleRevisionsStmt = database.prepare(`
+    SELECT id FROM revisions WHERE entry_id = ? ORDER BY created_at DESC LIMIT -1 OFFSET 40
+  `);
+  const deleteRevisionStmt = database.prepare('DELETE FROM revisions WHERE id = ?');
+  const deleteEntryRevisionsStmt = database.prepare('DELETE FROM revisions WHERE entry_id = ?');
 
   function mapRow(row) {
     if (!row) return null;
@@ -44,6 +72,17 @@ function openDatabase(filePath) {
       payload: row.payload,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
+    };
+  }
+
+  function mapRevision(row) {
+    if (!row) return null;
+    return {
+      id: row.id,
+      entryId: row.entry_id,
+      payload: row.payload,
+      action: row.action,
+      createdAt: row.created_at,
     };
   }
 
@@ -76,6 +115,22 @@ function openDatabase(filePath) {
     },
     allEntries() {
       return allStmt.all().map(mapRow);
+    },
+    insertRevision(row) {
+      insertRevisionStmt.run(row);
+      for (const stale of staleRevisionsStmt.all(row.entryId)) deleteRevisionStmt.run(stale.id);
+    },
+    listRevisions(entryId) {
+      return listRevisionsStmt.all(entryId).map(mapRevision);
+    },
+    getRevision(id) {
+      return mapRevision(getRevisionStmt.get(id));
+    },
+    listDeletedRevisions() {
+      return listDeletedStmt.all().map(mapRevision);
+    },
+    deleteEntryRevisions(entryId) {
+      deleteEntryRevisionsStmt.run(entryId);
     },
     transaction(fn) {
       database.transaction(fn)();

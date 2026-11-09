@@ -27,11 +27,9 @@
             <p class="tagline">Local-First Password Vault</p>
           </div>
         </div>
-        <ul class="principles">
-          <li>Bản ghi được mã hóa AES-256-GCM trước khi ghi vào SQLite.</li>
-          <li>Mật khẩu chính không bao giờ được lưu xuống đĩa.</li>
-          <li>Vault tự khóa sau 5 phút không thao tác.</li>
-        </ul>
+        <div class="welcome">
+          <p class="welcome-copy">Lưu tài khoản web, SSH, server và database. Tìm cái cần dùng, chép, rồi khóa lại khi rời máy. Chỉ mật khẩu chính của bạn mở được kho.</p>
+        </div>
       </div>
       <div class="lock-panel">
         <form id="lock-form" autocomplete="off">
@@ -39,20 +37,19 @@
           <h1 id="lock-heading">Mở vault</h1>
           <p id="lock-copy" class="lede">Nhập mật khẩu chính để giải mã các bản ghi trên máy này.</p>
           <label class="field">
-            <span>Mật khẩu chính</span>
+            <span>Mật khẩu chính<abbr class="req" title="Bắt buộc">*</abbr></span>
             <span class="field-control">
               <input id="master-password" type="password" autocomplete="off" spellcheck="false" required />
               <button id="toggle-master" class="ghost-btn" type="button">Hiện</button>
             </span>
           </label>
           <label id="confirm-wrap" class="field" hidden>
-            <span>Nhập lại mật khẩu chính</span>
+            <span>Nhập lại mật khẩu chính<abbr class="req" title="Bắt buộc">*</abbr></span>
             <input id="confirm-password" type="password" autocomplete="off" spellcheck="false" />
           </label>
           <p id="lock-error" class="form-error" role="alert"></p>
           <button id="unlock-btn" class="btn btn-primary btn-block" type="submit">Mở khóa</button>
-          <p class="fine-print">Tối thiểu 8 ký tự. Nếu quên mật khẩu chính, dữ liệu không thể khôi phục.</p>
-          <button id="reset-btn" class="text-btn" type="button" hidden>Xóa vault cục bộ…</button>
+          <p class="fine-print">Ít nhất 8 ký tự. Hãy nhớ mật khẩu này — quên thì không mở lại được.</p>
         </form>
       </div>
     </section>
@@ -73,15 +70,31 @@
           </div>
         </div>
         <nav id="category-nav" class="category-nav" aria-label="Danh mục"></nav>
+        <div class="sidebar-tools">
+          <button id="add-category-btn" class="nav-item" type="button">
+            <span class="nav-label"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg></span>Danh mục mới</span>
+          </button>
+          <button id="generator-nav" class="nav-item" type="button">
+            <span class="nav-label"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="8" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"></circle><path d="M11 12h9M16 12v3M19 12v2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg></span>Generator</span>
+          </button>
+          <button id="theme-btn" class="nav-item" type="button">
+            <span class="nav-label"><span class="nav-icon" aria-hidden="true"></span><span class="theme-label">Nền trắng</span></span>
+          </button>
+        </div>
         <div class="sidebar-actions">
-          <button id="import-btn" class="btn btn-block" type="button">Nhập JSON</button>
-          <button id="export-btn" class="btn btn-block" type="button">Xuất JSON</button>
-          <button id="theme-btn" class="btn btn-block" type="button">Giao diện sáng</button>
-          <button id="lock-btn" class="btn btn-primary btn-block" type="button">Khóa</button>
+          <div class="menu-wrap">
+            <button id="json-btn" class="btn btn-block" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="json-menu">Nhập / Xuất</button>
+            <div id="json-menu" class="context-menu sidebar-menu" role="menu" hidden>
+              <button id="import-btn" type="button">Nhập JSON</button>
+              <button id="export-btn" type="button">Xuất JSON</button>
+            </div>
+          </div>
+          <button id="lock-btn" class="btn btn-block" type="button">Đăng xuất</button>
         </div>
       </aside>
 
       <section class="workspace">
+        <div id="vault-view" class="vault-view">
         <header class="toolbar">
           <label class="search">
             <span class="sr-only">Tìm kiếm</span>
@@ -96,9 +109,20 @@
           <button id="new-btn" class="btn btn-primary" type="button">Thêm bản ghi</button>
         </header>
         <div class="table-wrap">
-          <table>
+          <div id="bulk-bar" class="bulk-bar" hidden>
+            <span id="bulk-count"></span>
+            <div class="bulk-actions">
+              <button id="bulk-export" class="btn btn-small" type="button">Xuất</button>
+              <button id="bulk-move" class="btn btn-small" type="button">Chuyển danh mục</button>
+              <button id="bulk-delete" class="btn btn-small btn-danger" type="button">Xóa</button>
+              <button id="bulk-restore" class="btn btn-small" type="button" hidden>Khôi phục</button>
+              <button id="bulk-purge" class="btn btn-small btn-danger" type="button" hidden>Xóa vĩnh viễn</button>
+            </div>
+          </div>
+          <table id="entry-table">
             <thead>
               <tr>
+                <th class="check-col"><input id="select-all" type="checkbox" aria-label="Chọn tất cả bản ghi đang hiện" /></th>
                 <th>Tiêu đề</th>
                 <th>Tài khoản</th>
                 <th>Máy chủ</th>
@@ -118,6 +142,37 @@
           <span id="idle-label">Tự khóa sau 5 phút không hoạt động</span>
           <span id="shortcut-label"></span>
         </footer>
+        </div>
+        <section id="generator" class="generator" hidden>
+          <p class="eyebrow">Generator</p>
+          <h2>Tạo mật khẩu</h2>
+          <div class="gen-output">
+            <output id="gen-password" class="mono"></output>
+            <div class="gen-actions">
+              <button id="gen-copy" class="icon-btn" type="button" aria-label="Chép mật khẩu">
+                <svg viewBox="0 0 24 24"><rect x="8" y="8" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"></rect><path d="M6 16V6a1 1 0 0 1 1-1h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path></svg>
+              </button>
+              <button id="gen-refresh" class="icon-btn" type="button" aria-label="Tạo lại">
+                <svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.2-5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"></path><path d="M20 5v5h-5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+              </button>
+            </div>
+          </div>
+          <p id="gen-strength" class="gen-strength">Rất mạnh</p>
+          <label class="gen-length">
+            <span>Độ dài: <strong id="gen-length-label">16</strong> ký tự</span>
+            <input id="gen-length" type="range" min="8" max="64" value="16" />
+          </label>
+          <div class="gen-sets">
+            <label><input id="gen-lower" type="checkbox" checked /> Chữ thường (abc)</label>
+            <label><input id="gen-upper" type="checkbox" checked /> Chữ hoa (ABC)</label>
+            <label><input id="gen-numbers" type="checkbox" checked /> Số (123)</label>
+            <label><input id="gen-symbols" type="checkbox" checked /> Ký tự ngẫu nhiên (!#$)</label>
+          </div>
+          <div class="gen-history">
+            <p class="eyebrow">Mật khẩu vừa tạo</p>
+            <ul id="gen-history"></ul>
+          </div>
+        </section>
       </section>
 
       <aside id="inspector" class="inspector" hidden>
@@ -129,33 +184,10 @@
         <div id="inspector-view">
           <h2 id="view-title"></h2>
           <p id="view-corrupt" class="form-error" hidden>Không giải mã được bản ghi này. Có thể xóa nó.</p>
-          <dl class="detail">
-            <div>
-              <dt>Tài khoản</dt>
-              <dd>
-                <span id="view-username"></span>
-                <button id="copy-username-btn" class="text-btn" type="button">Chép</button>
-              </dd>
-            </div>
-            <div>
-              <dt>Máy chủ</dt>
-              <dd id="view-host" class="mono"></dd>
-            </div>
-            <div>
-              <dt>Mật khẩu</dt>
-              <dd>
-                <span id="view-password" class="mono"></span>
-                <button id="reveal-btn" class="text-btn" type="button">Hiện</button>
-              </dd>
-            </div>
-            <div>
-              <dt>Ghi chú</dt>
-              <dd id="view-note" class="note"></dd>
-            </div>
-          </dl>
+          <div id="view-body"></div>
           <p id="view-updated" class="fine-print"></p>
           <div class="inspector-actions">
-            <button id="copy-password-btn" class="btn btn-primary" type="button">Chép mật khẩu</button>
+            <button id="history-btn" class="btn" type="button">Nhật ký</button>
             <button id="edit-btn" class="btn" type="button">Sửa</button>
             <button id="delete-btn" class="btn btn-danger" type="button">Xóa</button>
           </div>
@@ -163,32 +195,28 @@
 
         <form id="editor-form" autocomplete="off" hidden>
           <label class="field">
-            <span>Tiêu đề</span>
-            <input id="editor-title" type="text" maxlength="200" required spellcheck="false" />
-          </label>
-          <label class="field">
-            <span>Tài khoản</span>
-            <input id="editor-username" type="text" maxlength="320" autocomplete="off" spellcheck="false" />
-          </label>
-          <label class="field">
-            <span>Mật khẩu</span>
-            <span class="field-control">
-              <input id="editor-password" type="password" maxlength="2048" autocomplete="off" spellcheck="false" />
-              <button id="toggle-editor-password" class="ghost-btn" type="button">Hiện</button>
-            </span>
-          </label>
-          <button id="generate-btn" class="text-btn" type="button">Tạo mật khẩu ngẫu nhiên</button>
-          <label class="field">
-            <span>Máy chủ</span>
-            <input id="editor-host" type="text" maxlength="500" spellcheck="false" placeholder="host hoặc URL" />
+            <span>Loại</span>
+            <select id="editor-kind">
+              <option value="web">Web — trang web, dịch vụ</option>
+              <option value="ssh">SSH — máy đăng nhập bằng cổng</option>
+              <option value="server">Server — máy chủ</option>
+              <option value="database">Database — cơ sở dữ liệu</option>
+            </select>
           </label>
           <label class="field">
             <span>Danh mục</span>
             <select id="editor-category"></select>
+            <input id="editor-category-new" type="text" maxlength="40" hidden spellcheck="false" autocomplete="off" placeholder="Tên danh mục mới" />
           </label>
           <label class="field">
+            <span>Tiêu đề<abbr class="req" title="Bắt buộc">*</abbr></span>
+            <input id="editor-title" type="text" maxlength="200" required spellcheck="false" />
+          </label>
+          <div id="editor-fields"></div>
+          <div id="editor-accounts"></div>
+          <label class="field">
             <span>Ghi chú</span>
-            <textarea id="editor-note" rows="5" maxlength="20000"></textarea>
+            <textarea id="editor-note" rows="4" maxlength="20000"></textarea>
           </label>
           <div class="inspector-actions">
             <button id="editor-save" class="btn btn-primary" type="submit">Lưu</button>
@@ -198,6 +226,7 @@
       </aside>
     </div>
 
+    <div id="context-menu" class="context-menu" role="menu" hidden></div>
     <div id="toast" class="toast" role="status" hidden></div>
 
     <div id="modal" class="modal" hidden>

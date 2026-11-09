@@ -9,7 +9,7 @@ const {
   clipboard,
   ipcMain,
 } = require('electron');
-const { CATEGORIES, IDLE_LOCK_MS, CLIPBOARD_CLEAR_MS } = require('../shared/constants');
+const { IDLE_LOCK_MS, CLIPBOARD_CLEAR_MS } = require('../shared/constants');
 const { openDatabase } = require('./db');
 const { createVault } = require('./vault');
 const { VaultError } = require('./errors');
@@ -35,19 +35,20 @@ function fingerprint(text) {
   return crypto.createHash('sha256').update(text, 'utf8').digest();
 }
 
-function clearCopiedSecret() {
+async function clearCopiedSecret() {
   clearTimeout(copyTimer);
   copyTimer = null;
-  if (!copiedHash) return;
+  const expected = copiedHash;
+  copiedHash = null;
+  if (!expected) return;
   try {
-    const current = fingerprint(clipboard.readText());
-    if (current.length === copiedHash.length && crypto.timingSafeEqual(current, copiedHash)) {
+    const current = fingerprint(await clipboard.readText());
+    if (current.length === expected.length && crypto.timingSafeEqual(current, expected)) {
       clipboard.clear();
     }
   } catch {
     // The clipboard can be unavailable for a moment on some desktops.
   }
-  copiedHash = null;
 }
 
 function bumpActivity() {
@@ -56,10 +57,10 @@ function bumpActivity() {
   idleTimer = setTimeout(() => performLock('idle'), IDLE_LOCK_MS);
 }
 
-function performLock(reason) {
+async function performLock(reason) {
   clearTimeout(idleTimer);
   idleTimer = null;
-  clearCopiedSecret();
+  await clearCopiedSecret();
   if (ctx.vault) ctx.vault.lock();
   if (win && !win.isDestroyed()) {
     win.webContents.send('vault:locked', { reason });
@@ -98,7 +99,8 @@ function parseBackup(text) {
 function registerIpc() {
   handle('vault:status', async () => ({
     initialized: ctx.vault.isInitialized(),
-    categories: CATEGORIES,
+    unlocked: ctx.vault.isUnlocked(),
+    catalog: ctx.vault.listCategories(),
     idleMinutes: IDLE_LOCK_MS / 60000,
     clipboardSeconds: CLIPBOARD_CLEAR_MS / 1000,
   }));
@@ -116,7 +118,7 @@ function registerIpc() {
   });
 
   handle('vault:lock', async () => {
-    performLock('manual');
+    await performLock('manual');
     return {};
   });
 
@@ -161,9 +163,11 @@ function registerIpc() {
     return data;
   });
 
-  handle('entries:copy-password', async (id) => {
-    const password = ctx.vault.getPassword(id);
-    clipboard.writeText(password);
+  handle('entries:copy-password', async (payload) => {
+    const id = payload && typeof payload === 'object' ? payload.id : payload;
+    const accountId = payload && typeof payload === 'object' ? payload.accountId : undefined;
+    const password = ctx.vault.getPassword(id, accountId);
+    await clipboard.writeText(password);
     copiedHash = fingerprint(password);
     clearTimeout(copyTimer);
     copyTimer = setTimeout(clearCopiedSecret, CLIPBOARD_CLEAR_MS);
@@ -175,15 +179,54 @@ function registerIpc() {
     if (typeof text !== 'string' || text.length === 0 || text.length > 20000) {
       throw new VaultError('VALIDATION', 'Không có gì để chép.');
     }
-    clipboard.writeText(text);
+    await clipboard.writeText(text);
     bumpActivity();
     return { copied: true };
   });
 
-  handle('password:generate', async () => ctx.vault.generatePassword(20));
+  handle('clipboard:secret', async (text) => {
+    if (typeof text !== 'string' || text.length === 0 || text.length > 20000) {
+      throw new VaultError('VALIDATION', 'Không có gì để chép.');
+    }
+    await clipboard.writeText(text);
+    copiedHash = fingerprint(text);
+    clearTimeout(copyTimer);
+    copyTimer = setTimeout(clearCopiedSecret, CLIPBOARD_CLEAR_MS);
+    bumpActivity();
+    return { seconds: CLIPBOARD_CLEAR_MS / 1000 };
+  });
 
-  handle('vault:export', async () => {
-    const { entries, skippedCorrupt } = ctx.vault.exportEntries();
+  handle('password:generate', async (options) => ctx.vault.generatePassword(options || {}));
+  handle('categories:list', async () => ctx.vault.listCategories());
+  handle('categories:add', async (payload) => {
+    const kind = payload && typeof payload === 'object' ? payload.kind : 'web';
+    const name = payload && typeof payload === 'object' ? payload.name : payload;
+    const data = ctx.vault.addCategory(kind, name);
+    bumpActivity();
+    return data;
+  });
+  handle('categories:remove', async (payload) => {
+    const data = ctx.vault.removeCategory(payload && payload.kind, payload && payload.name);
+    bumpActivity();
+    return data;
+  });
+  handle('entries:history', async (id) => ({ revisions: ctx.vault.history(id) }));
+  handle('entries:revision', async (id) => ({ secret: ctx.vault.revisionSecret(id) }));
+  handle('entries:restore', async (id) => {
+    const data = ctx.vault.restore(id);
+    bumpActivity();
+    return data;
+  });
+  handle('entries:deleted', async () => ({ entries: ctx.vault.deletedRecords() }));
+  handle('entries:purge', async (ids) => {
+    const data = ctx.vault.purgeDeleted(ids);
+    bumpActivity();
+    return data;
+  });
+
+  handle('vault:export', async (ids) => {
+    const { entries, skippedCorrupt } = ctx.vault.exportEntries(Array.isArray(ids) ? ids : null);
+    if (!entries.length) throw new VaultError('VALIDATION', 'Không có bản ghi nào được chọn.');
     const chosen = await dialog.showSaveDialog(win, {
       title: 'Xuất bản sao lưu KeyDock',
       defaultPath: path.join(app.getPath('documents'), 'keydock_backup.json'),
@@ -298,7 +341,12 @@ function createWindow() {
 
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.webContents.on('render-process-gone', () => performLock('manual'));
+  win.webContents.on('render-process-gone', (_event, details) => {
+    const reason = details && details.reason;
+    if (reason === 'crashed' || reason === 'oom' || reason === 'abnormal-exit' || reason === 'integrity-failure') {
+      performLock('manual');
+    }
+  });
   if (process.env.KEYDOCK_SMOKE !== '1') {
     win.once('ready-to-show', () => win.show());
   }
@@ -353,7 +401,7 @@ async function runSmoke() {
   );
 
   const categories = await js("document.getElementById('category-nav').innerText");
-  for (const name of ['Tất cả', 'Web', 'Server', 'SSH Key', 'Database']) {
+  for (const name of ['Tất cả', 'Web', 'Server', 'SSH', 'Database']) {
     if (!categories.includes(name)) throw new Error(`missing category ${name}`);
   }
 
@@ -419,7 +467,7 @@ async function runSmoke() {
     if (!button) return { error: 'no-button' };
     return window.keydock.copyPassword(button.dataset.copy);
   })()`);
-  const copied = clipboard.readText();
+  const copied = await clipboard.readText();
   if (!copyResult || !copyResult.ok || copied !== 'secret-pass') {
     throw new Error(`copy failed: ${JSON.stringify(copyResult)} clipboard=${JSON.stringify(copied)}`);
   }
@@ -464,11 +512,19 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on('second-instance', focusWindow);
   app.on('window-all-closed', () => app.quit());
-  app.on('before-quit', () => {
-    clearTimeout(idleTimer);
-    clearCopiedSecret();
-    if (ctx.vault) ctx.vault.lock();
-    if (ctx.database) ctx.database.close();
+  let quitCleanup = false;
+  app.on('before-quit', (event) => {
+    if (quitCleanup) return;
+    event.preventDefault();
+    quitCleanup = true;
+    Promise.resolve(clearCopiedSecret()).finally(() => {
+      clearTimeout(idleTimer);
+      if (ctx.vault) ctx.vault.lock();
+      if (ctx.database) {
+        try { ctx.database.close(); } catch { /* already closed */ }
+      }
+      app.quit();
+    });
   });
 
   app.whenReady().then(() => {

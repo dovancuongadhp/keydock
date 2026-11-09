@@ -43,9 +43,18 @@ test('a different key cannot decrypt', async () => {
   other.fill(0);
 });
 
-test('password generator stays inside the requested alphabet and length', () => {
+test('password generator honors length and character sets', () => {
   const password = generatePassword(24);
   assert.equal(password.length, 24);
-  assert.match(password, /^[ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*\-_=+?]+$/);
+  assert.match(password, /^[A-Za-z0-9!@#$%^&*\-_=+?]+$/);
+  const lower = generatePassword({ length: 16, lowercase: true, uppercase: false, numbers: false, symbols: false });
+  assert.match(lower, /^[a-z]{16}$/);
   assert.throws(() => generatePassword(4));
+  assert.throws(() => generatePassword({
+    length: 12,
+    lowercase: false,
+    uppercase: false,
+    numbers: false,
+    symbols: false,
+  }));
 });

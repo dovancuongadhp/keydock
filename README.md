@@ -28,9 +28,9 @@ SQLite nằm tại:
 - macOS: `~/Library/Application Support/KeyDock/keydock.db`
 - Windows: `%APPDATA%\KeyDock\keydock.db`
 
-Mỗi bản ghi (tiêu đề, tài khoản, mật khẩu, máy chủ, danh mục, ghi chú) được mã hóa trước khi ghi. Salt ngẫu nhiên và bộ xác thực khóa nằm trong bảng `meta`. Khóa AES được tạo bằng PBKDF2-SHA256, 600.000 vòng, rồi chỉ giữ trong bộ nhớ cho đến khi khóa vault.
+Mỗi bản ghi gồm loại (Web, SSH, Server, Database), danh mục do bạn đặt trong loại đó (ví dụ Ngân hàng trong Web), tài khoản, mật khẩu và ghi chú. Tất cả được mã hóa trước khi ghi. Salt ngẫu nhiên và bộ xác thực khóa nằm trong bảng `meta`. Khóa AES được tạo bằng PBKDF2-SHA256, 600.000 vòng, rồi chỉ giữ trong bộ nhớ cho đến khi khóa vault. Mỗi lần sửa hoặc xóa, bản trước được giữ trong nhật ký để khôi phục.
 
-Vault tự khóa sau 5 phút không thao tác. Nút **Chép mật khẩu** ghi clipboard và xóa lại sau 15 giây nếu nội dung clipboard chưa đổi.
+Vault tự khóa sau 5 phút không thao tác. Nút sao chép ghi clipboard và xóa lại sau 15 giây nếu nội dung clipboard chưa đổi.
 
 ## Xuất / nhập JSON
 
@@ -38,4 +38,4 @@ File sao lưu là JSON **không mã hóa**, mỗi phần tử có `title`, `user
 
 Nếu tiêu đề trùng (không phân biệt hoa thường), hộp thoại hỏi ghi đè hoặc bỏ qua. Bản ghi thiếu tiêu đề bị bỏ qua.
 
-Quên mật khẩu chính thì không khôi phục được. Màn hình khóa có thao tác **Xóa vault cục bộ** — gõ `XOA VAULT` để xóa file cơ sở dữ liệu trên máy.
+Quên mật khẩu chính thì không mở lại được. Màn hình khóa không có nút xóa vault. Muốn bỏ hẳn kho thì tắt app rồi xóa file `keydock.db`.

@@ -55,17 +55,37 @@ function safeEqual(left, right) {
   return crypto.timingSafeEqual(a, b);
 }
 
-function generatePassword(length = 20) {
-  const size = Number(length);
-  if (!Number.isInteger(size) || size < 12 || size > 128) {
-    throw new Error('Password length must be between 12 and 128');
+const PASSWORD_SETS = {
+  lowercase: 'abcdefghijklmnopqrstuvwxyz',
+  uppercase: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+  numbers: '0123456789',
+  symbols: '!@#$%^&*-_=+?',
+};
+
+function generatePassword(options = 20) {
+  const settings = typeof options === 'number' ? { length: options } : (options || {});
+  const size = Number(settings.length ?? 20);
+  if (!Number.isInteger(size) || size < 8 || size > 128) {
+    throw new Error('Password length must be between 8 and 128');
   }
-  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*-_=+?';
-  let out = '';
-  for (let i = 0; i < size; i += 1) {
-    out += alphabet[crypto.randomInt(alphabet.length)];
+  const alphabets = Object.entries(PASSWORD_SETS)
+    .filter(([name]) => settings[name] !== false)
+    .map(([, alphabet]) => alphabet);
+  if (!alphabets.length) throw new Error('Choose at least one character set');
+
+  const chars = [];
+  if (size >= alphabets.length) {
+    for (const alphabet of alphabets) chars.push(alphabet[crypto.randomInt(alphabet.length)]);
   }
-  return out;
+  const pool = alphabets.join('');
+  while (chars.length < size) chars.push(pool[crypto.randomInt(pool.length)]);
+  for (let index = chars.length - 1; index > 0; index -= 1) {
+    const swap = crypto.randomInt(index + 1);
+    const current = chars[index];
+    chars[index] = chars[swap];
+    chars[swap] = current;
+  }
+  return chars.join('');
 }
 
 module.exports = {
