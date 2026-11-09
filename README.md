@@ -21,6 +21,16 @@ npm run dist:win   # dist/KeyDock Setup 1.0.0.exe
 
 Bản macOS trong cấu hình này không ký chứng chỉ Developer ID. Bản Windows là bộ cài NSIS (file `.exe`).
 
+## Cài từ file phát hành
+
+Máy Mac nào tải file DMG rồi mở đều bị Gatekeeper chặn một lần, vì app chưa được Apple notarize. Kéo KeyDock vào Applications, rồi trong Terminal:
+
+```bash
+xattr -cr /Applications/KeyDock.app && open /Applications/KeyDock.app
+```
+
+Máy Windows không hiện hộp thoại đó. SmartScreen có thể hỏi vì file cài chưa có chứng chỉ. Chọn vẫn chạy là cài được.
+
 ## Dữ liệu
 
 SQLite nằm tại:
