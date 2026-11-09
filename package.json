@@ -1,0 +1,64 @@
+{
+  "name": "keydock",
+  "version": "1.0.0",
+  "description": "KeyDock — Local-First Password Vault",
+  "main": "src/main/main.js",
+  "author": "KeyDock",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/crypto.test.js test/vault.test.js && node scripts/run-db-tests.js && node scripts/smoke-ui.js",
+    "postinstall": "electron-builder install-app-deps",
+    "dist": "electron-builder",
+    "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg",
+    "dist:win": "electron-builder --win nsis"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3"
+  },
+  "devDependencies": {
+    "electron": "^45.2.3",
+    "electron-builder": "^26.18.0"
+  },
+  "build": {
+    "appId": "com.keydock.app",
+    "productName": "KeyDock",
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/better-sqlite3/**"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "target": [
+        "dmg"
+      ],
+      "category": "public.app-category.productivity",
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "dmg": {
+      "title": "KeyDock"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "KeyDock"
+    }
+  }
+}

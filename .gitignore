@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+*.log
+.DS_Store
+keydock.db
+keydock.db-*
+keydock_backup.json
